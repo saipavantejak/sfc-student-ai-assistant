@@ -3,15 +3,14 @@ import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { SYSTEM_INSTRUCTION } from "../constants";
 import { Message, DocumentFile } from "../types";
 
-export const askGemini = async (
+export const askGeminiStream = async function* (
   apiKey: string,
   question: string,
   history: Message[],
   documents: DocumentFile[]
-): Promise<{ text: string }> => {
+) {
   const ai = new GoogleGenAI({ apiKey });
   
-  // Prepare history for Gemini API format
   const chatHistory = history
     .filter(msg => msg.id !== 'welcome')
     .map(msg => ({
@@ -19,10 +18,8 @@ export const askGemini = async (
       parts: [{ text: msg.content }]
     }));
 
-  // Current prompt parts
   const currentParts: any[] = [];
   
-  // Add all uploaded documents as inlineData parts
   documents.forEach(doc => {
     currentParts.push({
       inlineData: {
@@ -32,11 +29,10 @@ export const askGemini = async (
     });
   });
   
-  // Add the user's question
   currentParts.push({ text: question });
 
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const result = await ai.models.generateContentStream({
       model: 'gemini-3-flash-preview',
       contents: [
         ...chatHistory,
@@ -44,16 +40,16 @@ export const askGemini = async (
       ],
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.2, 
+        temperature: 0.1, // Lower temperature for more consistent formatting
       },
     });
 
-    return { text: response.text || "I'm sorry, I couldn't process that request." };
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    if (error.message?.includes("API key")) {
-       throw new Error("Invalid API Key. Please check your environment variables.");
+    for await (const chunk of result) {
+      const text = chunk.text;
+      if (text) yield text;
     }
+  } catch (error: any) {
+    console.error("Gemini Streaming Error:", error);
     throw error;
   }
 };

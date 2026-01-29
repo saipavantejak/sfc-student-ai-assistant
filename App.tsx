@@ -5,7 +5,7 @@ import ChatBubble from './components/ChatBubble';
 import ChatWindow from './components/ChatWindow';
 import { Message, DocumentFile } from './types';
 import { COLORS } from './constants';
-import { askGemini } from './services/geminiService';
+import { askGeminiStream } from './services/geminiService';
 
 const App: React.FC = () => {
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -51,7 +51,7 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, {
       id: uuidv4(),
       role: 'bot',
-      content: `I've successfully ingested: ${fileNames}. You can now ask questions about these documents or upload more.`,
+      content: `I've successfully ingested: **${fileNames}**. You can now ask questions about these documents.`,
       timestamp: new Date()
     }]);
   };
@@ -76,27 +76,40 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
+    // Create a placeholder bot message for streaming
+    const botMessageId = uuidv4();
+    const botMessagePlaceholder: Message = {
+      id: botMessageId,
+      role: 'bot',
+      content: '',
+      timestamp: new Date(),
+      source: documents.length > 0 ? `${documents.length} Doc(s)` : undefined,
+    };
+
+    setMessages(prev => [...prev, botMessagePlaceholder]);
+
     try {
       const apiKey = process.env.API_KEY || '';
-      const response = await askGemini(apiKey, text, historyToSend, documents);
+      const stream = askGeminiStream(apiKey, text, historyToSend, documents);
       
-      const botMessage: Message = {
-        id: uuidv4(),
-        role: 'bot',
-        content: response.text,
-        timestamp: new Date(),
-        source: documents.length > 0 ? `${documents.length} Document(s)` : undefined,
-        link: response.text.toLowerCase().includes("cannot find") ? "mailto:thehub@sfc.edu" : undefined
-      };
+      let fullContent = '';
+      for await (const chunk of stream) {
+        fullContent += chunk;
+        setMessages(prev => prev.map(msg => 
+          msg.id === botMessageId ? { ...msg, content: fullContent } : msg
+        ));
+      }
 
-      setMessages(prev => [...prev, botMessage]);
+      // Check if we should add a link after stream is finished
+      if (fullContent.toLowerCase().includes("cannot find") || fullContent.toLowerCase().includes("don't see")) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === botMessageId ? { ...msg, link: "mailto:thehub@sfc.edu" } : msg
+        ));
+      }
     } catch (error: any) {
-      setMessages(prev => [...prev, {
-        id: uuidv4(),
-        role: 'bot',
-        content: `Error: ${error.message || "Failed to connect to TerrierHelper service."}`,
-        timestamp: new Date()
-      }]);
+      setMessages(prev => prev.map(msg => 
+        msg.id === botMessageId ? { ...msg, content: `Error: ${error.message || "Connection failed."}` } : msg
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -118,19 +131,19 @@ const App: React.FC = () => {
             <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-lg rotate-3 transition-transform hover:rotate-0">
                <span className="text-2xl font-black" style={{ color: COLORS.sfcRed }}>SFC</span>
             </div>
-            <h1 className="text-3xl font-bold mb-4">TerrierHelper</h1>
-            <p className="text-sm opacity-80 leading-relaxed">
-              The multi-document assistant for St. Francis College. 
-              Upload handbooks, syllabi, or policy docs to get instant contextual answers.
+            <h1 className="text-3xl font-bold mb-4 tracking-tight">TerrierHelper</h1>
+            <p className="text-sm opacity-80 leading-relaxed font-light">
+              The intelligent student portal for St. Francis College. 
+              Powered by advanced AI to navigate handbooks and academic policies in real-time.
             </p>
           </div>
           
           <div className="mt-8">
-            <div className="text-xs uppercase tracking-widest opacity-60 mb-2 font-bold">Quick Links</div>
-            <ul className="space-y-2 text-sm">
-              <li><a href="#" className="hover:underline opacity-80 hover:opacity-100">Student Portal</a></li>
-              <li><a href="#" className="hover:underline opacity-80 hover:opacity-100">Academic Support</a></li>
-              <li><a href="#" className="hover:underline opacity-80 hover:opacity-100">Financial Aid</a></li>
+            <div className="text-[10px] uppercase tracking-widest opacity-40 mb-3 font-black">Official Resources</div>
+            <ul className="space-y-3 text-sm">
+              <li><a href="https://www.sfc.edu" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100"><i className="fa-solid fa-globe w-4"></i> sfc.edu</a></li>
+              <li><a href="#" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100"><i className="fa-solid fa-user-graduate w-4"></i> MySFC Portal</a></li>
+              <li><a href="#" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100"><i className="fa-solid fa-calendar-days w-4"></i> Academic Calendar</a></li>
             </ul>
           </div>
         </div>
@@ -138,16 +151,22 @@ const App: React.FC = () => {
         {/* Right Side: Simulation Portal */}
         <div className="md:w-2/3 p-8 bg-gray-50 flex flex-col">
           <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <i className="fa-solid fa-folder-open text-6xl mb-6 text-gray-300"></i>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Knowledge Ingestion</h2>
-            <p className="text-gray-500 mb-8 max-w-md">
-              Upload one or more PDF documents to provide TerrierHelper with the context it needs to help you.
+            <div className="w-20 h-20 bg-gray-200/50 rounded-3xl flex items-center justify-center mb-6 border border-gray-200">
+              <i className="fa-solid fa-file-shield text-3xl text-gray-400"></i>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Policy Ingestion</h2>
+            <p className="text-gray-500 mb-8 max-w-md text-sm">
+              Upload PDF files to initialize TerrierHelper's knowledge base. Multiple files are supported.
             </p>
 
             {/* Ingestion Panel */}
-            <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-              <label className="block text-sm font-semibold text-gray-700 mb-4 text-left">
-                Documents Ingested ({documents.length})
+            <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative group">
+               <div className="absolute -top-3 right-6 px-3 py-1 bg-[#cf2e2e] text-white text-[10px] font-black rounded-full uppercase tracking-wider">
+                 v2.0 Native Stream
+               </div>
+
+              <label className="block text-xs font-bold text-gray-400 mb-4 text-left uppercase tracking-tighter">
+                Active Knowledge Objects ({documents.length})
               </label>
               
               <div className="relative group mb-4">
@@ -158,50 +177,48 @@ const App: React.FC = () => {
                   onChange={handleFileUpload}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                 />
-                <div className={`p-6 border-2 border-dashed rounded-xl flex flex-col items-center gap-3 transition-colors border-gray-200 group-hover:border-[#cf2e2e] bg-gray-50 group-hover:bg-[#ffeded]`}>
+                <div className={`p-6 border-2 border-dashed rounded-xl flex flex-col items-center gap-3 transition-all border-gray-200 group-hover:border-[#cf2e2e] bg-gray-50/50 group-hover:bg-[#ffeded] group-hover:shadow-inner`}>
                   {uploadState === 'ingesting' ? (
-                    <i className="fa-solid fa-spinner fa-spin text-2xl text-[#cf2e2e]"></i>
+                    <i className="fa-solid fa-circle-notch fa-spin text-2xl text-[#cf2e2e]"></i>
                   ) : (
-                    <i className="fa-solid fa-cloud-arrow-up text-2xl text-gray-400 group-hover:text-[#cf2e2e]"></i>
+                    <i className="fa-solid fa-plus text-2xl text-gray-300 group-hover:text-[#cf2e2e]"></i>
                   )}
-                  <span className="text-xs font-medium text-gray-600">
-                    Click or drag to add PDFs
+                  <span className="text-xs font-bold text-gray-500 group-hover:text-[#cf2e2e]">
+                    Click to add Handbook or Syllabus
                   </span>
                 </div>
               </div>
 
               {/* Document List */}
-              <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-2 max-h-[180px] overflow-y-auto pr-2 custom-scrollbar">
                 {documents.map((doc, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-100 group">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <i className="fa-solid fa-file-pdf text-[#cf2e2e] flex-shrink-0"></i>
-                      <span className="text-xs truncate text-gray-700 font-medium">{doc.name}</span>
+                  <div key={idx} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg border border-gray-100 group hover:border-[#cf2e2e]/30 transition-colors">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="w-8 h-8 rounded bg-red-100 flex items-center justify-center text-[#cf2e2e] text-xs font-bold">PDF</div>
+                      <span className="text-xs truncate text-gray-700 font-semibold">{doc.name}</span>
                     </div>
                     <button 
                       onClick={() => removeDocument(idx)}
-                      className="text-gray-400 hover:text-red-500 transition-colors"
+                      className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all"
                     >
-                      <i className="fa-solid fa-trash-can text-xs"></i>
+                      <i className="fa-solid fa-xmark text-xs"></i>
                     </button>
                   </div>
                 ))}
                 {documents.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-4 italic">No documents uploaded yet.</p>
+                  <div className="py-6 border border-dashed rounded-lg border-gray-100 text-center">
+                    <p className="text-[11px] text-gray-400 font-medium italic">Ready for document upload</p>
+                  </div>
                 )}
               </div>
-              
-              <p className="mt-4 text-[10px] text-gray-400 uppercase text-center font-bold">
-                Private & Local Processing
-              </p>
             </div>
           </div>
 
-          <div className="mt-8 pt-8 border-t flex items-center justify-between text-xs text-gray-400 font-medium">
-             <span>St. Francis College © 2025</span>
+          <div className="mt-8 pt-8 border-t flex items-center justify-between text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+             <span>St. Francis College TerrierHelper</span>
              <span className="flex items-center gap-2">
-               <i className="fa-solid fa-shield-halved"></i>
-               Secure Session
+               <i className="fa-solid fa-lock text-green-500/50"></i>
+               Private Session
              </span>
           </div>
         </div>
